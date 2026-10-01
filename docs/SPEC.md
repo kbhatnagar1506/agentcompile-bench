@@ -1,12 +1,22 @@
 # AgentCompile Bench: unified benchmark spec
 
-As of 2026-09-30 · Krishna Bhatnagar
+As of 2026-10-01 (updated from 2026-09-30 with the first runtime bench results) · Krishna Bhatnagar
 
 ## Why we need it
 
 One benchmark run should prove, in a few dollars and under an hour, everything AgentCompile claims: same answers, far fewer agent calls, no wrong actions, correct hand-offs, faster replies, safe when it breaks, on every provider. No existing benchmark measures this; we combine the good ones and add what is missing.
 
 What AgentCompile is, in one line: an SDK around the agent's model client that learns the jobs an agent repeats from its own history, answers those model calls with compiled routines, and passes everything else to the agent unchanged.
+
+How it answers matters for what we measure. On each model call it returns one of three things:
+- **a tool call:** the next step of a compiled job;
+- **a reply to the person:** in the company's `voice` setting:
+  - `none`: their agent talks;
+  - `template`: our fixed text;
+  - `worded`: a model writes in the agent's voice, held to our facts;
+- **forward:** their agent handles it.
+
+The bench has to score both the "doing" and the "talking".
 
 What the benchmark must let us say, with numbers and confidence bounds:
 
@@ -18,6 +28,8 @@ What the benchmark must let us say, with numbers and confidence bounds:
 6. **Consistent:** the same task succeeds on every one of k runs (pass^k).
 7. **Safe in the live path:** if AgentCompile fails or is slow, the agent still finishes.
 8. **Works with everyone:** the paths work on each provider we list.
+9. **Talks as well as the agent:** when AgentCompile replies to a person, its replies score at least as well as the agent's.
+10. **Works beyond one benchmark:** gains hold on domains and tasks we never tuned on.
 
 Why existing benchmarks are not enough: the τ family (Sierra) has realistic customers and real state but little repetition and no middle layer; caching and routing papers test reuse or cost on one setup each, without correctness; nothing scores hand-offs, consent before writes, or fail-open.
 
@@ -38,7 +50,10 @@ Twelve capabilities, each tagged on tasks so one run scores all of them. Pass cr
 | C9 | Fail-open | The agent survives AgentCompile failing | Kill, slow, corrupt the decision service mid-run | 0 broken conversations; added time ≤ timeout |
 | C10 | Providers | Every listed provider works | Same small agent on each provider, sync, async, streaming, tools | Every path passes on every provider |
 | C11 | Learning curve | How fast a job moves from agent to compiled | Jobs arrive over a simulated timeline | Report conversations needed until a job goes live |
-| C12 | Overhead | Cost of our own layer | Decision calls, tokens, latency of the decision service | Our cost per conversation reported; p50 decision ≤ 80 ms |
+| C12 | Overhead | Cost of our own layer | Decision calls, tokens, latency of the decision service, **and every model call we make (form filler, small model, reply wording)** | Our cost per conversation reported; p50 decision ≤ 80 ms |
+| C13 | Reply quality | Our replies to the person are as good as the agent's | LLM judge (different family from the one writing our replies) scores every reply, ours and the agent's, 1–5 on clear, natural, helpful | Ours ≥ agent's on each axis (bounded); until then the voice ships as `none` |
+| C14 | Generality | Gains are not tuned to one benchmark | Dev split for all tuning; final numbers on a held-out split and a second domain we never tuned on | The C1–C6 verdicts hold on the held-out split and the second domain |
+| C15 | Recipe authoring | The compiler and harness turn repeated jobs into proven recipes | Real refused jobs, each with its past runs as the answer key (see suite 9) | Held-out agreement per recipe reported; 0 recipes shipped below the gate |
 
 ## What we compile in
 
@@ -69,6 +84,15 @@ Seven suites no existing benchmark has.
 5. **Latency suite (C8, C12).** Both arms in the same time window and region; end-to-end time per turn and per conversation, decision-service p50 and p95, recorded on every run.
 6. **Provider matrix (C10).** One small reference agent, about 10 tasks, run on OpenAI, Anthropic, Google Gemini, Grok, Azure OpenAI and Amazon Bedrock; sync, async, streaming, tool calls; compiled, forwarded and fail-open paths each exercised.
 7. **Framework matrix (C10).** The same tasks driven by a raw loop, LangGraph, the OpenAI Agents SDK and CrewAI, each passing the wrapped client.
+8. **Reply quality (C13).** Every reply in a run, ours (`templated`) and the agent's, judged on the same scale with the conversation before it. One arm per voice: `none`, `template`, `worded`.
+9. **Recipe authoring (C15).** Jobs the mechanical compiler refuses on real data, with their past runs as the answer key. Six to start:
+   - AReaL airline: update baggage; change flights (two shapes)
+   - AReaL retail: change address
+   - Exgentic retail: change address
+   - Exgentic telecom: refuel data
+
+   Scored on held-out agreement, rounds, cost per passing recipe, and the share of values settled by search vs by a model. Includes formula search for computed values and model-read numbers checked against the answers.
+10. **Doing agents (C1, C2, C9).** Coding and browser agents, where the work is commands and page steps rather than talk. A repetition world of repo chores (run tests, fix lint, bump a version) and form-filling sites, run in a sandbox, plus a held-out task set. This is where the "doing" saving should be largest; it is untested so far.
 
 Reference agents: a raw tool-calling loop is the default; framework agents only in the framework matrix. Agent models: one frontier model for accuracy runs, plus the provider matrix for coverage.
 
@@ -100,6 +124,10 @@ Every run reports every metric below, per suite and pooled, as a paired comparis
 | Tokens | Agent input and output tokens per conversation | tokens |
 | Cost | Agent tokens × list price, plus AgentCompile's own calls, reported separately | $ per conversation |
 | Compiled share | Share of conversations finished with no agent call | % |
+| Runtime writes | Writes AgentCompile sent itself; how many the system accepted; how many matched the expected write | count per arm |
+| Agent cost cut | Agent $ per conversation vs baseline, separately from agent calls cut (removed calls are often the cheap, early ones) | % |
+| Reply quality | Judge scores, ours vs the agent's, per voice | 1–5, three axes |
+| Replay agreement | Recipe logic replayed with the agent's own choices given ("assisted"), always reported apart from end-to-end success and never pooled with it | matches / mismatches / refusals |
 | Hand-off accuracy | Near-miss conversations correctly handed to the agent | % |
 | Wrong-write rate | Writes that differ from the expected write, per arm | per 100 writes |
 | Consent violations | Writes without an explicit customer yes | count (must be 0) |
@@ -116,10 +144,11 @@ Statistics:
 - **Parity margin:** success counts as "same" when the lower bound is above −5 points.
 - **Pooling:** several rounds pooled per task, because a single round swings about ±4 points.
 - **Held-out split** always reported separately from tasks the jobs were learned from.
+- **Dev vs final:** fixes are chosen from dev-split failures only; the held-out split and the second domain are run once per release, never used to pick what to fix.
 
 ## Keeping it cheap
 
-Target: a full release run for a few dollars and under an hour; one τ-bench round costs about $150–300 and a day on a VM today.
+Target: a full release run for a few dollars and under an hour. Measured on 2026-10-01: 40 τ-bench retail tasks, one trial, with Gemini 2.5 Flash as agent and Pro as the customer, took about 15 minutes and $1–2 in model calls on a laptop. Earlier rounds that cost $150–300 used Pro agents on the full split with 4 trials.
 
 1. **Cached simulated customer.** The customer's reply is stored per (task, persona, conversation so far). Later runs replay it instead of calling a model, which also makes runs repeatable.
 2. **Baseline once per agent model.** The without-AgentCompile arm reruns only when the agent model, prompt or benchmark version changes.
@@ -137,16 +166,50 @@ Target: a full release run for a few dollars and under an hour; one τ-bench rou
 | Release | ~1 hour | Core suites, both arms, latency, scorecard | < $30 |
 | Monthly | half a day | Breadth suites, framework matrix, fresh baseline | < $150 |
 
+## Where we are (2026-10-01)
+
+Pieces exist in the product repo (`kbhatnagar1506/agent-compiler`) and should be moved or imported here:
+- `scripts/run_arm.py --arm serve --voice …`: the with-SDK arm on τ-bench.
+- `scripts/summarize_serve.py`: the scorer.
+- `scripts/judge_replies.py`: reply quality.
+- `tests/fixtures/domains.py`: calendar and email domains.
+
+Latest internal numbers. These are the **dev split, one trial, not published**:
+
+| Run, 40 τ-bench retail tasks | Accuracy | Agent calls / conv | Agent cost / conv | Runtime writes (OK / sent) | Wrong runtime writes |
+| --- | --- | --- | --- | --- | --- |
+| Agent alone | 75.6% (4 trials) | 17.2 | $0.0141 | – | – |
+| With SDK, start of day | 82.5% | 11.6 | – | 0 / 2 | 0 |
+| With SDK, `template` voice | 80.0% | 7.3 | – | 7 / 8 | 0 |
+| With SDK, `worded` voice | 72.5% | 7.7 | – | 11 / 12 | 0 |
+| With SDK, `none` voice | 72.5% | 17.6 | – | 0 / 0 | 0 |
+
+Reply quality (judge, 1–5: clear / natural / helpful):
+
+| Replies | Clear | Natural | Helpful |
+| --- | --- | --- | --- |
+| Agent | 4.2 | 3.5 | 4.3 |
+| Ours, template | 3.5 | 2.5 | 3.4 |
+| Ours, worded | 3.8 | 2.8 | 3.4 |
+
+What these numbers already teach the bench:
+- **Calls are not cost.** Calls fell 46%, but the agent bill fell 29%.
+- **`voice: none` saves nothing in chat.** The runtime's first move is usually to say something, so it hands off at once.
+- **Count what the runtime itself does.** "Writes sent" overstated jobs done: 2 sent, 0 accepted.
+- **Separate replay agreement from end-to-end results.** The published 430/48/0 replay was given the agent's own choices.
+- **One trial is too noisy.** Accuracy swings about ±5 points.
+
 ## Build plan
 
 Six milestones, in order; each is done when its check passes.
 
-1. **Runner and trace format.** One runner that fans out (suite × agent × model × arm × trial) on a worker pool with a budget cap; the shared trace format; the scorecard. Done when a τ-bench retail run reproduces our earlier published numbers through it.
+1. **Runner and trace format.** One runner that fans out (suite × agent × model × arm × trial) on a worker pool with a budget cap; the shared trace format; the scorecard. Start from the product repo's serve arm and scorer. Done when a τ-bench retail run reproduces our earlier published numbers through it and counts every AgentCompile model call.
 2. **Cheap mode.** Customer cache, baseline reuse, stratified task set, sequential stopping. Done when a release run on τ retail costs under $30 and gives the same verdicts as the full run.
-3. **Our additions on τ retail.** Near-miss suite, consent audit, fail-open chaos, latency. Done when the scorecard shows C4, C5, C8 and C9 with bounds.
+3. **Our additions on τ retail.** Near-miss suite, consent audit, fail-open chaos, latency, reply quality with the voice arms. Done when the scorecard shows C4, C5, C8, C9 and C13 with bounds.
 4. **SDK and provider matrix.** The Python SDK (`agentcompile.wrap`) in the loop; the provider and framework matrices. Done when every listed provider passes every path.
 5. **Repetition world.** The synthetic company with 8 jobs, held-out customers and the learning-curve timeline. Done when it runs end to end and its baseline is stable across two runs.
 6. **More suites.** τ², τ³, T1-Bench, then AppWorld, AgentBench and BFCL subsets. Done when each adapter's results appear on the same scorecard.
+7. **Recipe authoring and doing agents.** Suite 9 on the six refused real jobs, then suite 10 (code and browser repetition worlds in a sandbox). Done when C15 is on the scorecard and one doing-agent world runs both arms.
 
 - [ ] Milestone 1: runner, trace format, scorecard
 - [ ] Milestone 2: cheap mode
@@ -154,6 +217,7 @@ Six milestones, in order; each is done when its check passes.
 - [ ] Milestone 4: SDK and provider matrix
 - [ ] Milestone 5: repetition world
 - [ ] Milestone 6: more suites
+- [ ] Milestone 7: recipe authoring and doing agents
 
 ## Open decisions
 
@@ -163,3 +227,5 @@ Six milestones, in order; each is done when its check passes.
 4. **How much to invest in the synthetic world** before real design-partner logs arrive.
 5. **Licenses:** which benchmarks allow redistributing tasks, and which we load at run time only.
 6. **Name:** AgentCompile Bench, CompileBench or RepeatBench (AgentBench is taken).
+7. **Judge model for reply quality:** a different family from the one wording our replies (Claude on Vertex, if enabled); with Gemini only, the score is advisory.
+8. **Which second domain is the generality check:** τ airline, telecom, or the synthetic world.
