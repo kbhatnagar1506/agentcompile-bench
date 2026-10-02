@@ -35,7 +35,7 @@ Why existing benchmarks are not enough: the τ family (Sierra) has realistic cus
 
 ## Capabilities to test
 
-Twelve capabilities, each tagged on tasks so one run scores all of them. Pass criteria are the bar for a release.
+Fifteen capabilities, each tagged on tasks so one run scores all of them. Pass criteria are the bar for a release.
 
 | # | Capability | What it means | How it is tested | Pass criterion |
 | --- | --- | --- | --- | --- |
@@ -75,7 +75,7 @@ If a license does not allow redistribution, we ship only the adapter and downloa
 
 ## Our additions
 
-Seven suites no existing benchmark has.
+Ten suites no existing benchmark has.
 
 1. **Repetition world (C1, C2, C3, C11).** One synthetic company (support plus operations, about 25 tools, a real database, a written policy) with 8 repeated jobs: order status, cancel, change address, exchange, refund, reset password, update payment, subscription change. Each job comes with 30+ customers whose details vary; a held-out third is never seen in training logs. Jobs arrive in a simulated timeline so we can measure the learning curve.
 2. **Near-miss suite (C4).** For every job, generated twists that look like the job but must go to the agent: partial actions ("cancel but keep the shoes"), extra requests, policy exceptions, vague openers, topic switches mid-job, a different customer's order. Correct behavior is a hand-off with the whole conversation.
@@ -84,7 +84,7 @@ Seven suites no existing benchmark has.
 5. **Latency suite (C8, C12).** Both arms in the same time window and region; end-to-end time per turn and per conversation, decision-service p50 and p95, recorded on every run.
 6. **Provider matrix (C10).** One small reference agent, about 10 tasks, run on OpenAI, Anthropic, Google Gemini, Grok, Azure OpenAI and Amazon Bedrock; sync, async, streaming, tool calls; compiled, forwarded and fail-open paths each exercised.
 7. **Framework matrix (C10).** The same tasks driven by a raw loop, LangGraph, the OpenAI Agents SDK and CrewAI, each passing the wrapped client.
-8. **Reply quality (C13).** Every reply in a run, ours (`templated`) and the agent's, judged on the same scale with the conversation before it. One arm per voice: `none`, `template`, `worded`.
+8. **Reply quality (C13).** Every reply in a run, ours (`template` and `worded`) and the agent's, judged on the same scale with the conversation before it. One arm per voice: `none`, `template`, `worded`.
 9. **Recipe authoring (C15).** Jobs the mechanical compiler refuses on real data, with their past runs as the answer key. Six to start:
    - AReaL airline: update baggage; change flights (two shapes)
    - AReaL retail: change address
@@ -201,7 +201,7 @@ What these numbers already teach the bench:
 
 ## Build plan
 
-Six milestones, in order; each is done when its check passes.
+Seven milestones, in order; each is done when its check passes.
 
 1. **Runner and trace format.** One runner that fans out (suite × agent × model × arm × trial) on a worker pool with a budget cap; the shared trace format; the scorecard. Start from the product repo's serve arm and scorer. Done when a τ-bench retail run reproduces our earlier published numbers through it and counts every AgentCompile model call.
 2. **Cheap mode.** Customer cache, baseline reuse, stratified task set, sequential stopping. Done when a release run on τ retail costs under $30 and gives the same verdicts as the full run.
