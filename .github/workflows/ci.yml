@@ -1,0 +1,49 @@
+name: ci
+
+# Every-commit tier: $0, no model calls. The toy suite runs end to end through the real
+# agentcompile SDK against a local decision service; the τ-bench adapter is checked offline.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest -q
+
+  tau-adapter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev,tau]"
+      - run: pytest -q tests/test_tau.py
+
+  smoke:
+    # The CLI path a release run takes, on the toy suite: run, score, gate.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: acbench run --suite toy --agent fake/toy --arms baseline --trials 2 --run-id smoke
+      - run: acbench gate runs/smoke
